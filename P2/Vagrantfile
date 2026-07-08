@@ -1,0 +1,52 @@
+Vagrant.configure("2") do |config|
+  config.vm.define "mchliyahS" do |master|
+    master.vm.box = "debian/bookworm64" 
+    master.vm.hostname = "mchliyahS"
+    master.vm.network "private_network", ip: "192.168.56.110"
+    master.vm.synced_folder ".", "/vagrant"  # Ensuring the shared folder is enabled
+
+    master.vm.provider "virtualbox" do |vb|
+      vb.name = "mchliyahS"
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+
+    # Provisioning script to install k3s and deploy the app
+    master.vm.provision "shell", inline: <<-SHELL
+      sudo apt-get update
+      sudo apt-get install -y curl
+
+      sudo swapoff -a
+      sudo sed -i '/swap/d' /etc/fstab
+
+      curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--node-ip 192.168.56.110" sh -
+
+      # Wait for k3s to be ready
+      echo "Waiting for k3s to start..."
+      until sudo kubectl get nodes 2>/dev/null; do
+        sleep 5
+      done
+
+      # Deploy application using the manifests in the shared folder
+      echo "Deploying Nginx application..."
+      sudo kubectl apply -f /vagrant/app1.yaml
+      sudo kubectl apply -f /vagrant/app2.yaml
+      sudo kubectl apply -f /vagrant/app3.yaml
+
+      echo "Waiting for kubesystem ..."
+      until sudo kubectl get pods -n kube-system | grep traefik 2>/dev/null; do
+        sleep 5
+      done
+
+      sudo kubectl apply -f /vagrant/ingress.yaml
+
+      echo " applications deployed successfully!"
+      echo "You can access it at http://192.168.56.110"
+
+      # sudo kubectl delete -f /vagrant/app1.yaml
+      # sudo kubectl delete -f /vagrant/app2.yaml
+      # sudo kubectl delete -f /vagrant/app3.yaml
+      # sudo kubectl delete -f /vagrant/ingress.yaml
+    SHELL
+  end
+end

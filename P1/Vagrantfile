@@ -1,0 +1,53 @@
+Vagrant.configure("2") do |config|
+  config.vm.define "mchliyahS" do |master|
+    master.vm.box = "debian/bookworm64"
+    master.vm.hostname = "mchliyahS"
+    master.vm.network "private_network", ip: "192.168.56.110"
+    master.vm.provider "virtualbox" do |vb|
+      vb.name = "mchliyahS"
+      vb.memory = "1024" 
+      vb.cpus = 1
+    end
+    master.vm.provision "shell", inline: <<-SHELL
+
+      sudo apt-get update
+      sudo apt-get install -y curl net-tools
+
+      sudo swapoff -a
+      sudo sed -i '/swap/d' /etc/fstab
+
+      curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--node-ip 192.168.56.110" sh -
+
+      echo "Exporting node token for worker nodes..."
+      sudo cat /var/lib/rancher/k3s/server/node-token > /vagrant/.node-token
+    SHELL
+  end
+
+  # Define the k3s worker node
+  config.vm.define "mchliyahSW" do |worker|
+    worker.vm.box = "debian/bookworm64"  # Debian 12 (Bookworm)
+    worker.vm.hostname = "mchliyahSW"
+    worker.vm.network "private_network", ip: "192.168.56.111"
+    worker.vm.provider "virtualbox" do |vb|
+      vb.name = "mchliyahSW"
+      vb.memory = "1024"
+      vb.cpus = 1
+    end
+    worker.vm.provision "shell", inline: <<-SHELL
+      sudo apt-get update
+      sudo apt-get install -y curl net-tools
+
+      sudo swapoff -a
+      sudo sed -i '/swap/d' /etc/fstab
+
+      echo "Waiting for the master node to be ready..."
+      until [ -f /vagrant/.node-token ]; do echo "waiting"; sleep 1; done
+
+      NODE_TOKEN=$(cat /vagrant/.node-token)
+
+      # Join the worker node to the cluster
+      echo "Joining the worker node to the cluster..."
+      curl -sfL https://get.k3s.io | K3S_URL=https://192.168.56.110:6443 K3S_TOKEN=${NODE_TOKEN} INSTALL_K3S_EXEC="--node-ip 192.168.56.111" sh -
+    SHELL
+  end
+end
